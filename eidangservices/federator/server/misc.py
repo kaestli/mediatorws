@@ -11,6 +11,8 @@ import random
 import tempfile
 import uuid
 
+from copy import deepcopy
+
 from redis.exceptions import RedisError
 
 from eidangservices.federator.server import redis_client
@@ -328,7 +330,6 @@ def elements_equal(e, e_other, exclude_tags=[], recursive=True):
         # XXX(damb): In order to make use of len(e) to increase
         # performance we create local copies of the elements with child
         # elements excluded
-        from copy import deepcopy
         local_e = deepcopy(e)
         local_e_other = deepcopy(e_other)
         remove_elements(local_e, exclude_tags, recursive)

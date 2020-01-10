@@ -6,6 +6,7 @@ EIDA federator task facilities
 import collections
 import datetime
 import enum
+import hashlib
 import json
 import logging
 import os
@@ -15,6 +16,7 @@ from multiprocessing.pool import ThreadPool
 import ijson
 
 from lxml import etree
+from sortedcontainers import SortedDict
 
 from eidangservices import settings
 from eidangservices.federator.server.misc import (
@@ -348,16 +350,13 @@ class StationXMLNetworkCombinerTask(CombinerTask):
 
         nets = set([se.network for route in routes for se in route.streams])
 
-        # TODO(damb): Use assert instead
-        if len(nets) != 1:
-            raise ValueError(
-                'Routes must belong exclusively to a single '
-                'network code.')
+        assert len(nets) == 1, ('Routes must belong exclusively to a single '
+                                'network code.')
 
         super().__init__(routes, query_params, logger=self.LOGGER, **kwargs)
         self._level = self.query_params.get('level', 'station')
 
-        self._network_elements = []
+        self._network_elements = {}
         self.path_tempfile = None
 
     def _clean(self, result):
@@ -411,6 +410,7 @@ class StationXMLNetworkCombinerTask(CombinerTask):
                     _result = result.get()
                     if _result.status_code == 200:
                         if self._level in ('channel', 'response'):
+                            # TODO(damb): Reimplement
                             # merge <Channel></Channel> elements into
                             # <Station></Station> from the correct
                             # <Network></Network> epoch element
@@ -438,6 +438,7 @@ class StationXMLNetworkCombinerTask(CombinerTask):
                                         sta_element)
 
                         elif self._level == 'station':
+                            # TODO(damb): Reimplement
                             # append <Station></Station> elements to the
                             # corresponding <Network></Network> epoch
                             for _net_element in self._extract_net_elements(
@@ -499,7 +500,7 @@ class StationXMLNetworkCombinerTask(CombinerTask):
         self.path_tempfile = get_temp_filepath()
         self.logger.debug('{}: tempfile={!r}'.format(self, self.path_tempfile))
         with open(self.path_tempfile, 'wb') as ofd:
-            for net_element in self._network_elements:
+            for net_element in self._network_elements.values():
                 s = etree.tostring(net_element)
                 _length += len(s)
                 ofd.write(s)
@@ -530,16 +531,18 @@ class StationXMLNetworkCombinerTask(CombinerTask):
             element already is known (:code:`True`) else :code:`False`
         :rtype: tuple
         """
-        for existing_net_element in self._network_elements:
-            if elements_equal(
-                net_element,
-                existing_net_element,
-                exclude_tags,
-                    recursive=True):
-                return existing_net_element, True
+        # TODO(damb): Allow *exclude* parameter or force clients to remove the
+        # children before computing the hash?
 
-        self._network_elements.append(net_element)
-        return net_element, False
+        key = self._make_key(net_element)
+
+        try:
+            found_net_element = self._network_elements[key]
+        except KeyError:
+            self._network_elements[key] = net_element
+            return net_element, False
+        else:
+            return found_net_element, True
 
     def _emerge_sta_elements(self, net_element,
                              namespaces=settings.STATIONXML_NAMESPACES):
@@ -613,6 +616,17 @@ class StationXMLNetworkCombinerTask(CombinerTask):
 
         else:
             net_element.append(sta_element)
+
+    @staticmethod
+    def _make_key(element, hash_method=hashlib.md5):
+        """
+        Compute hash for ``element`` based on the elements' attributes.
+        """
+        key_args = sorted(element.attrib.items())
+        return hash_method(str(key_args).encode('utf-8')).digest()
+
+
+
 
 
 # -----------------------------------------------------------------------------
